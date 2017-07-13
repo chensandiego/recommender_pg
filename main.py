@@ -212,6 +212,126 @@ class MovieLens(object):
 
         return abs(numerator/denominator)
 
+
+    def similar_critics(self,user,metric='euclidean',n=None):
+        """
+        find and rank similar critics for the user according to the
+        specified distance metric. Returns the top n similar critics
+        """
+
+        #metric table
+        metrics={
+            'euclidean': self.euclidean_distance,
+            'pearson':self.pearson_correlation,
+        }
+        distance=metrics.get(metric,None)
+
+        #handle problems that might occur
+        if user not in self.reviews:
+            raise KeyError("unknown user, '%s'."%user)
+        if not distance or not callable(distance):
+            raise KeyError("unknown or unprogrammed distance metric '%s'."%metric)
+
+        #compute user to critic sim for all critics
+
+        critics={}
+        for critic in self.reviews:
+            #avoid compare against self
+            if critic==user:
+                continue
+            critics[critic]=distance(user,critic)
+        if n:
+            return heapq.nlargest(n,critics.items(),key=itemgetter(1))
+        return critics
+
+
+
+
+
+    def predict_all_rankings(self,user,metric='euclidean',n=None):
+        """
+        predicts all rankings for all movies,if n is specified returns
+        the top n movies and their predict ranking
+        """
+
+        critics= self.similar_critics(user,metric=metric )
+        movies={
+            movie: self.predict_ranking(user,movie,metric,critics)
+            for movie in self.movies
+        }
+
+        if n:
+            return heapq.nlargest(n,movies.items(),key=itemgetter(1))
+        return movies
+
+    def shared_critics(self,movieA,movieB):
+        """
+        return the intersect of critics for item a and b
+        """
+        if movieA not in self.movies:
+            raise KeyError("Cound not find movie '%s' in data " % movieA)
+
+        if movieB not in self.movies:
+            raise KeyError("Cound not find movie '%s' in data " % movieB)
+
+        criticsA = set(critic for critic in self.reviews if movieA in self.reviews[critic])
+
+        criticsB = set(critic for critic in self.reviews if movieB in self.reviews[critic])
+
+        shared = criticsA & criticsB #intersect operate
+
+        #create the reviews dictionary to return
+        reviews ={}
+        for critic in shared:
+            reviews[critic] = (
+                self.reviews[critic][movieA]['rating'],
+                self.reviews[critic][movieB]['rating'],
+
+            )
+        return reviews
+
+    def similar_items(self,movie,metric='euclidean',n=None):
+        #metric
+        metrics={
+            'euclidean': self.euclidean_distance,
+            'pearson':self.pearson_correlation,
+        }
+        distance=metrics.get(metric,None)
+
+        #error check if no movie is in reviews
+        if movie not in self.reviews:
+            raise KeyError("unknown movie, '%s'"% movie)
+        if not distance or not callable(distance):
+            raise KeyError("unknown or unprogrammed distance metric, '%s'"% metric)
+
+        items = {}
+        for item in self.movies:
+            if item == movie:
+                continue
+            items[item]= distance(item,movie,prefs='movies')
+
+        if n:
+            return heapq.nlargest(n,items.items(),key=itemgetter(1))
+        return items
+
+    def predict_ranking(self,user,movie,metric='euclidean',critics=None):
+        """
+        predict the ranking a user might give a movie according to the weighted
+        average of the critics that are similar to the user
+        """
+        critics=critics or self.similar_critics(user,metric=metric)
+        total=0.0
+        simsum=0.0
+
+        for critic,similarity in critics.items():
+            if movie in self.reviews[critic]:
+                total += similarity * self.reviews[critic][movie]['rating']
+                simsum +=similarity
+
+        if simsum==0.0: return 0.0
+        return total /simsum
+
+
 def main():
     data=relative_path('u.data')
     item=relative_path('u.item')
@@ -228,7 +348,18 @@ def main():
     print("pearson correlation computation")
     print(model.pearson_correlation(232,532))
 
+    print("Prediction by using euclidean  "+ str(model.predict_ranking(422,50,'euclidean')))
 
+    print("Prediction by using pearson "+ str(model.predict_ranking(422,50,'pearson')))
 
+    for mid,rating in model.predict_all_rankings(578,'pearson',10):
+        print ("%0.3f: %s"%(rating,model.movies[mid]['title']))
+
+    #print the list of similar items
+    for movie,similarity in model.similar_items(631,'pearson').items():
+        print("%0.3f: %s" % (similarity,model.movies[movie]['title']))
+
+    #predict user ranking
+    print(model.predict_ranking(232,52,'pearson'))
 if __name__=='__main__':
     main()
